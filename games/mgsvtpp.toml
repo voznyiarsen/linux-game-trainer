@@ -1,0 +1,290 @@
+# Metal Gear Solid V: The Phantom Pain - Game Configuration
+# Place this file in ~/.config/trainer/games/mgsvtpp.toml or ./games/mgsvtpp.toml
+
+[metadata]
+name = "Metal Gear Solid V: The Phantom Pain"
+version = "1.15"
+author = "FLiNG (adapted for Linux)"
+description = "MGSV Trainer with 23 cheats"
+executable_names = ["mgsvtpp.exe"]
+steam_app_id = 287700
+
+[process]
+names = ["mgsvtpp.exe"]
+case_insensitive = true
+require_wine = true
+module_name = "mgsvtpp.exe"
+
+[settings]
+scan_chunk_size = 65536
+refresh_interval_secs = 2
+auto_attach = false
+
+# Cheats matching FLiNG trainer layout
+[[cheats]]
+id = 1
+name = "Infinite Health"
+description = "Player health never decreases (sets HP to 20000)"
+hotkey = { key = "numpad1", modifiers = [] }
+type = "signature_patch"
+signature = "F3 0F 11 4A D4"
+mask = "xxxxxx"
+patch_offset = 0
+patch_bytes = []
+
+[[cheats]]
+id = 2
+name = "Infinite Ammo & Grenades"
+description = "Weapons never run out of ammo or grenades"
+hotkey = { key = "numpad2", modifiers = [] }
+type = "nop"
+signature = "66 41 89 14 00"
+mask = "xxxxx"
+length = 5
+
+[[cheats]]
+id = 3
+name = "No Reload"
+description = "Weapons fire continuously without reloading"
+hotkey = { key = "numpad3", modifiers = [] }
+type = "nop"
+signature = "66 41 89 14 00"
+mask = "xxxxx"
+length = 5
+
+[[cheats]]
+id = 4
+name = "Infinite Suppressor Durability"
+description = "Suppressors never wear out"
+hotkey = { key = "numpad4", modifiers = [] }
+type = "nop"
+signature = "46 88 4C 01 04"
+mask = "xxxxx"
+length = 5
+
+[[cheats]]
+id = 5
+name = "Super Accuracy"
+description = "Perfect accuracy, no spread"
+hotkey = { key = "numpad5", modifiers = [] }
+type = "nop"
+signature = "F3 0F 11 4E 3C"
+mask = "xxxxxx"
+length = 6
+
+[[cheats]]
+id = 6
+name = "No Recoil"
+description = "Weapons have zero recoil"
+hotkey = { key = "numpad6", modifiers = [] }
+type = "nop"
+signature = "F3 0F 11 96 B8 00 00 00"
+mask = "xxxxxxxxxx"
+length = 10
+
+[[cheats]]
+id = 7
+name = "Rapid Fire"
+description = "Greatly increased fire rate"
+hotkey = { key = "numpad7", modifiers = [] }
+type = "signature_patch"
+signature = "F3 0F 11 96 C4 00 00 00"
+mask = "xxxxxxxxxx"
+patch_offset = 0
+patch_bytes = []
+
+[[cheats]]
+id = 8
+name = "Weapons No Overheat"
+description = "Heavy weapons never overheat"
+hotkey = { key = "numpad8", modifiers = [] }
+type = "nop"
+signature = "F3 0F 5C C1 F3 0F 11 81 08 01 00 00"
+mask = "xxxxxxxxxxxxxxxxxx"
+length = 18
+
+[[cheats]]
+id = 9
+name = "Zero Hit Received"
+description = "Enemies cannot damage player"
+hotkey = { key = "numpad9", modifiers = [] }
+type = "nop"
+signature = "40 53 55 41 56 48 83 EC 70 48"
+mask = "xxxxxxxxxxxxxx"
+length = 14
+
+[[cheats]]
+id = 10
+name = "One Hit Kill"
+description = "Enemies die in one hit"
+hotkey = { key = "numpad0", modifiers = [] }
+type = "signature_patch"
+signature = "44 0F B7 42 0C"
+mask = "xxxxx"
+patch_offset = 0
+patch_bytes = []
+
+[[cheats]]
+id = 11
+name = "Daytime +1 Hour"
+description = "Advance in-game time by 1 hour"
+hotkey = { key = "add", modifiers = [] }
+type = "signature_patch"
+signature = "89 48 5C 48 83 C4 28"
+mask = "xxxxxxxxxx"
+patch_offset = 0
+patch_bytes = []
+
+[[cheats]]
+id = 12
+name = "Daytime -1 Hour"
+description = "Rewind in-game time by 1 hour"
+hotkey = { key = "subtract", modifiers = [] }
+type = "signature_patch"
+signature = "89 48 5C 48 83 C4 28"
+mask = "xxxxxxxxxx"
+patch_offset = 0
+patch_bytes = []
+
+[[cheats]]
+id = 13
+name = "Infinite GMP"
+description = "GMP currency never decreases"
+hotkey = { key = "numpad1", modifiers = ["ctrl"] }
+type = "nop"
+signature = "44 0F 4F 00"
+mask = "xxxx"
+length = 4
+
+[[cheats]]
+id = 14
+name = "Infinite Heroism"
+description = "Heroism points never decrease"
+hotkey = { key = "numpad2", modifiers = ["ctrl"] }
+type = "nop"
+signature = "44 0F 4F 00 48 8B 83 18 0A 00 00"
+mask = "xxxxxxxxxxxxxxxxxx"
+length = 20
+
+[[cheats]]
+id = 15
+name = "Infinite Fuel"
+description = "Sets Fuel to the 500000 cap (static offset 0x2C1267C, value stored x2; verified live on this build)"
+hotkey = { key = "numpad3", modifiers = ["ctrl"] }
+type = "write_value"
+offset = "0x2C1267C"
+value = [64, 36, 15, 0]
+
+[[cheats]]
+id = 16
+name = "Reset Mission Elapsed Time"
+description = "Reset mission timer to 0:00"
+hotkey = { key = "numpad4", modifiers = ["ctrl"] }
+type = "nop"
+signature = "F2 0F 11 8F C0 0E 00 00"
+mask = "xxxxxxxxxxxx"
+length = 12
+
+[[cheats]]
+id = 17
+name = "Unlock All Developments"
+description = "All weapons/items developments unlocked"
+hotkey = { key = "numpad5", modifiers = ["ctrl"] }
+type = "signature_patch"
+signature = "80 B8 30 30 00 00 00"
+mask = "xxxxxxxx"
+patch_offset = 0
+patch_bytes = []
+
+[[cheats]]
+id = 18
+name = "Instant Development"
+description = "Developments complete instantly"
+hotkey = { key = "numpad6", modifiers = ["ctrl"] }
+type = "signature_patch"
+signature = "F3 48 0F 2C 85 C8 FE 01 00"
+mask = "xxxxxxxxxxxxxx"
+patch_offset = 0
+patch_bytes = []
+
+[[cheats]]
+id = 19
+name = "Instant Facility Upgrade"
+description = "Mother Base facility upgrades complete instantly"
+hotkey = { key = "numpad7", modifiers = ["ctrl"] }
+type = "signature_patch"
+signature = "41 0F B7 57 0E 48"
+mask = "xxxxxxx"
+patch_offset = 0
+patch_bytes = []
+
+[[cheats]]
+id = 20
+name = "Stealth Mode"
+description = "Enemies cannot detect player"
+hotkey = { key = "numpad8", modifiers = ["ctrl"] }
+type = "nop"
+signature = "0F 57 D2 0F 2F 57 44"
+mask = "xxxxxxxxxx"
+length = 10
+
+[[cheats]]
+id = 21
+name = "Enemies Can't Move"
+description = "All enemies are frozen in place"
+hotkey = { key = "numpad9", modifiers = ["ctrl"] }
+type = "nop"
+signature = "44 0F B7 62 20"
+mask = "xxxxx"
+length = 5
+
+[[cheats]]
+id = 22
+name = "Super Speed"
+description = "Player moves at extremely high speed"
+hotkey = { key = "add", modifiers = ["ctrl"] }
+type = "signature_patch"
+signature = "F3 0F 59 43 30"
+mask = "xxxxxx"
+patch_offset = 0
+patch_bytes = []
+
+[[cheats]]
+id = 23
+name = "Slow Motion"
+description = "Game runs in slow motion"
+hotkey = { key = "subtract", modifiers = ["ctrl"] }
+type = "signature_patch"
+signature = "F2 0F 11 49 40"
+mask = "xxxxxxxx"
+patch_offset = 0
+patch_bytes = []
+
+# Resource max cheats (verified live: stored = display x2, caps at 500000 display).
+# Offsets are static for this game build; re-verify after game updates.
+[[cheats]]
+id = 24
+name = "Max Biological Material"
+description = "Sets Biological Material to the 500000 cap (static offset 0x2C12680, value stored x2; verified live)"
+hotkey = { key = "f1", modifiers = [] }
+type = "write_value"
+offset = "0x2C12680"
+value = [64, 36, 15, 0]
+
+[[cheats]]
+id = 25
+name = "Max Common Metal"
+description = "Sets Common Metal to the 500000 cap (static offset 0x2C12684, value stored x2; verified live)"
+hotkey = { key = "f2", modifiers = [] }
+type = "write_value"
+offset = "0x2C12684"
+value = [64, 36, 15, 0]
+
+[[cheats]]
+id = 26
+name = "Max Minor Metal"
+description = "Sets Minor Metal to the 500000 cap (static offset 0x2C12688, value stored x2; verified live)"
+hotkey = { key = "f3", modifiers = [] }
+type = "write_value"
+offset = "0x2C12688"
+value = [64, 36, 15, 0]

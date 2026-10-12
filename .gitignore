@@ -1,0 +1,14 @@
+# Compiled output (regenerate with cargo build --release)
+/target/
+# Per-crate legacy target dirs, if any
+core/target/
+cli/target/
+# Backups created by `apply` (machine-local)
+/mnt/
+*.bin
+# Editor / OS noise
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
