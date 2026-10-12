@@ -39,24 +39,83 @@ Under Wine expect exactly one file-backed mapping (the PE header,
 `r--p` at the ImageBase, e.g. `0x140000000`) plus large **anonymous**
 `r-xp`/`rwxp` regions — that is normal (see ARCHITECTURE.md).
 
-## 2. Code cheats: signatures
+## 2. Code cheats: finding signatures
 
-Sources, in order of preference:
+A signature is a byte pattern that locates the instruction(s) to patch,
+without depending on hardcoded addresses. The framework scans executable
+regions for it at runtime (`Signature::parse` in `core/src/scanner.rs`;
+IDA-style hex with `??`/`?` wildcards).
 
-1. **Community Cheat Engine tables** (`.CT`): `aobscanmodule(...)` patterns
-   plus injection-point comments (`game.exe+OFFSET`) and `[DISABLE]`
-   original bytes. This is how all 23 MGSV code cheats were sourced.
-2. **Your own RE**: disassemble around interesting behavior, pick 8–20
-   unique bytes with `??` for addresses/relocations.
+### 2a. From a Cheat Engine table (fastest)
 
-Validate each signature against the **live** game before shipping. Quick
-recipe with the repo's own tooling — scan all executable regions and count
-hits (the headless `apply` does exactly this and fails unless unique):
+Community `.CT` tables usually contain ready-made patterns. Look for
+`aobscanmodule` lines and the commented disassembly around them:
 
-- 1 hit → good.
-- 0 hits → version drift (see §4) or wrong module.
-- 2+ hits → lengthen the pattern or anchor with surrounding bytes and use
-  `patch_offset` (for `signature_patch`) to target the sub-instruction.
+```
+// from Metal Gear Solid V.CT — "Infinite Hp" entry
+aobscanmodule(HealthZaa,$process,F3 0F 11 4A D4) // should be unique
+...
+// ---------- INJECTING HERE ----------
+mgsvtpp.exe+11F849B: F3 0F 11 4A D4        - movss [rdx-2C],xmm1
+```
+
+Convert to TOML in three steps:
+
+1. **Signature** ← the byte list: `"F3 0F 11 4A D4"`.
+2. **Length / patch** ← the `[DISABLE]` block, which restores original
+   bytes and therefore tells you both the instruction length and the
+   exact original encoding:
+   ```
+   HealthZaa:
+     db F3 0F 11 4A D4     # 5 bytes -> length = 5 for a "nop" cheat
+   ```
+3. **Semantics** ← the `// ... - <disassembly>` comment: `movss [rdx-2C],xmm1`
+   *writes* health, so NOPing it freezes health. If the comment shows a
+   *read/compare* (e.g. `cmp`, `test`), NOPing usually disables a check —
+   good for stealth/no-detection style cheats.
+
+Worked example (MGSV Infinite Health → `games/mgsvtpp.toml` cheat 1).
+
+### 2b. From your own reverse engineering
+
+1. Attach a disassembler/debugger to the game (x64dbg, IDA, Ghidra, or
+   Cheat Engine's debugger + "Find out what writes to this address" on a
+   value you located via §3).
+2. Identify the target instruction, then select **8–20 bytes** around it
+   following these rules:
+   - **Keep opcodes, wildcard addresses.** `E8 ?? ?? ?? ??` (call rel32),
+     `0F 10 05 ?? ?? ?? ??` (RIP-relative `movss`), and any absolute
+     address/immediate that ASLR or versions change → `??` each byte.
+     Example: `F3 0F 10 87 6C 02 00 00` keeps the full `movss` + displacement
+     (stable), while a neighboring `call` becomes `E8 ?? ?? ?? ??`.
+   - **Prefer longer over shorter.** 5-byte patterns (e.g. `09 C2 41 89 13`)
+     routinely collide or vanish across builds; 10+ bytes with 1–3 wildcards
+     is the sweet spot. Our MGSV scan found 22/23 short patterns but the
+     5-byte resource one had **0 hits** in the live build.
+   - **Include context, patch precisely.** If only part of the match is the
+     patch site, extend the signature over neighboring instructions and use
+     `patch_offset` (for `signature_patch`) so the write lands exactly.
+3. Note the instruction length (from the disassembler) — that is your
+   `length` for `nop`, or the `patch_bytes` span for `signature_patch`.
+
+### 2c. Validate against the live game
+
+Never ship an unscanned pattern. The headless `apply` is the validator —
+it scans all executable regions and reports hit counts:
+
+- **1 hit** → good. Record the `module+0xRVA` it prints.
+- **0 hits** → version drift (see §4): the bytes changed. Diff the
+  disassembly at the old injection offset against the table's commented
+  disassembly; look for same-mnemonic-different-encoding swaps (we hit
+  `09 C2` → `0B D0`, both `or edx,eax`).
+- **2+ hits** → lengthen the pattern, or keep it and pass `--first` only
+  after confirming (via surrounding disassembly) that the first hit is the
+  right site.
+
+Then finish the loop: `apply --cheat <id> --enable`, verify the effect
+in-game, `apply --cheat <id> --disable`, and confirm the restore (read-back
+is verified automatically; the original bytes live in the `--backup-dir`
+`.bin` file).
 
 ## 3. Data cheats: value scanning
 
