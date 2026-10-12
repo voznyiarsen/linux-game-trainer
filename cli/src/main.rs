@@ -3,6 +3,8 @@ use anyhow::{Result, Context, bail};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
+mod ctimport;
+
 #[derive(Parser)]
 #[command(name = "trainer", version, about = "Modular game trainer framework")]
 struct Cli {
@@ -39,6 +41,26 @@ enum Commands {
         /// Output file path
         #[arg(short, long, default_value = "games/new_game.toml")]
         output: PathBuf,
+    },
+
+    /// Import a Cheat Engine (.CT) table into a game TOML config.
+    /// Extracts aobscan patterns, original bytes and hotkeys; every cheat
+    /// is emitted as a `nop` approximation that MUST be validated live.
+    ImportCt {
+        /// Path to the .CT file
+        table: PathBuf,
+
+        /// Output TOML path
+        #[arg(short, long)]
+        output: PathBuf,
+
+        /// Game name (default: table file stem)
+        #[arg(short, long)]
+        game: Option<String>,
+
+        /// Executable name fallback (default: guessed from aobscan modules)
+        #[arg(short, long)]
+        exe: Option<String>,
     },
 
     /// Apply a single cheat headlessly (for testing/scripting, no TUI).
@@ -110,6 +132,23 @@ fn main() -> Result<()> {
             let template = GameConfig::template();
             std::fs::write(&output, toml::to_string_pretty(&template)?)?;
             println!("✓ Created template at {}", output.display());
+        }
+        Commands::ImportCt { table, output, game, exe } => {
+            let (config, report) = ctimport::import_ct(&table, game, exe)?;
+            std::fs::write(&output, toml::to_string_pretty(&config)?)?;
+            println!("✓ Wrote {} cheat(s) to {}", report.imported.len(), output.display());
+            for c in &report.imported {
+                let note = if c.notes.is_empty() { String::new() } else { format!(" [{}]", c.notes.join("; ")) };
+                println!("  [{:>3}] {:45} sig='{}' len={}{}", c.id, c.name, c.signature, c.length, note);
+            }
+            if !report.skipped.is_empty() {
+                println!("Skipped {} entr{} (no usable pattern):", report.skipped.len(), if report.skipped.len() == 1 { "y" } else { "ies" });
+                for (name, reason) in &report.skipped {
+                    println!("  - {}: {}", name, reason);
+                }
+            }
+            println!("NOTE: imports are nop approximations of code-cave scripts.");
+            println!("Validate each with `apply --cheat <id> --enable` before trusting it.");
         }
         Commands::Apply { game, cheat, enable, disable, config_dir, backup_dir, first } => {
             let do_enable = if disable { false } else { true };

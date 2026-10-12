@@ -46,10 +46,35 @@ without depending on hardcoded addresses. The framework scans executable
 regions for it at runtime (`Signature::parse` in `core/src/scanner.rs`;
 IDA-style hex with `??`/`?` wildcards).
 
-### 2a. From a Cheat Engine table (fastest)
+### 2a. From a Cheat Engine table (fastest — now automated)
 
-Community `.CT` tables usually contain ready-made patterns. Look for
-`aobscanmodule` lines and the commented disassembly around them:
+Use the importer instead of hand-converting:
+
+```bash
+trainer_cli import-ct "Game.CT" -o games/mygame.toml --game "My Game"
+```
+
+It extracts, per script entry: the first `aobscanmodule(...)` pattern
+(`??`/`?` partial-nibble wildcards like `5?` are widened to `??`),
+original bytes from the first `label:` + `db` in `[DISABLE]` (resolving
+`define(name, bytes)` symbols) for the patch length, and CE hotkeys
+(decimal VK codes → key + ctrl/shift/alt, with notes for momentary
+`OnlyWhileDown` and multi-key chords, which import as toggles on the first
+key). The exe name is guessed from the most common non-`$process` module
+argument. Entries without a usable pattern (Lua-only scripts, value/group
+rows) are reported as skipped, not silently dropped.
+
+On the MGSV table (432 KiB) this yields **146 cheats** in one run, e.g.
+`Infinite Hp` → `F3 0F 11 4A D4`, len 5, plus `Stun Soldiers [Alt+E]` with
+its Alt+E binding intact.
+
+Caveat (printed by every import): CE `alloc`+`jmp newmem` code-cave scripts
+become plain **`nop` approximations** over the original bytes — the custom
+injected logic is *not* replicated. Treat every import as a candidate:
+validate each with `apply --cheat <id> --enable` (uniqueness-checked scan,
+read-back-verified write) before trusting it, and hand-tune semantics as
+§2b–§2c describe. The manual conversion below explains what the importer
+does field by field, for when you need to fix one up by hand.
 
 ```
 // from Metal Gear Solid V.CT — "Infinite Hp" entry

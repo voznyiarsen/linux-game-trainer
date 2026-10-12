@@ -1,4 +1,4 @@
-use crate::cheats::{Cheat, CheatManager, CheatType, Hotkey, ModifierKey, VirtualKey};
+use crate::cheats::{CheatManager, CheatType, Hotkey, ModifierKey};
 use crate::memory::ProcessMemory;
 use crate::process::find_process;
 use crate::scanner::{Signature, SignatureScanner};
@@ -416,17 +416,7 @@ impl std::fmt::Display for Hotkey {
         let mods: Vec<&str> = self.modifiers.iter().map(|m| match m {
             ModifierKey::Control => "Ctrl", ModifierKey::Shift => "Shift", ModifierKey::Alt => "Alt",
         }).collect();
-        let key_name = match self.key {
-            VirtualKey::Numpad0 => "Num 0", VirtualKey::Numpad1 => "Num 1", VirtualKey::Numpad2 => "Num 2",
-            VirtualKey::Numpad3 => "Num 3", VirtualKey::Numpad4 => "Num 4", VirtualKey::Numpad5 => "Num 5",
-            VirtualKey::Numpad6 => "Num 6", VirtualKey::Numpad7 => "Num 7", VirtualKey::Numpad8 => "Num 8",
-            VirtualKey::Numpad9 => "Num 9", VirtualKey::Add => "Num +", VirtualKey::Subtract => "Num -",
-            VirtualKey::Multiply => "Num *", VirtualKey::Divide => "Num /",
-            VirtualKey::F1 => "F1", VirtualKey::F2 => "F2", VirtualKey::F3 => "F3", VirtualKey::F4 => "F4",
-            VirtualKey::F5 => "F5", VirtualKey::F6 => "F6", VirtualKey::F7 => "F7", VirtualKey::F8 => "F8",
-            VirtualKey::F9 => "F9", VirtualKey::F10 => "F10", VirtualKey::F11 => "F11", VirtualKey::F12 => "F12",
-            _ => "?",
-        };
+        let key_name = self.key.display_name();
         if mods.is_empty() { write!(f, "{}", key_name) } else { write!(f, "+{}+{}", mods.join("+"), key_name) }
     }
 }

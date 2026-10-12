@@ -56,6 +56,19 @@ Behavior:
 Exit code is non-zero on any failure (scan miss, non-unique, verify
 mismatch, missing backup); nothing is written in those cases.
 
+## `import-ct` — import a Cheat Engine table
+
+```bash
+trainer_cli import-ct "Game.CT" -o games/mygame.toml [--game "My Game"] [--exe game.exe]
+```
+
+Parses `.CT` XML and emits a game TOML: first `aobscanmodule` pattern per
+script entry → `nop` cheat (length from `[DISABLE]` original bytes, `define`
+symbols resolved), CE hotkeys mapped to key + modifiers, exe guessed from
+module args. Prints per-cheat signatures plus a skipped-entries report.
+See ADDING_GAMES.md §2a. **Imports are nop approximations — validate each
+with `apply` before trusting it.**
+
 ## `validate` — check a config file
 
 ```bash
