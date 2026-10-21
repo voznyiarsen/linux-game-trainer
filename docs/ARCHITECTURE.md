@@ -63,20 +63,38 @@ re-verification after game updates.
 - `Signature::parse("F3 0F 11 4A D4 ... ?? ...")` — hex bytes, `??`/`?`
   wildcards.
 - `SignatureScanner::scan_region` reads in 1 MiB chunks over `/proc/pid/mem`
-  and matches in userspace, with overlap handling so matches spanning chunk
-  boundaries are not missed.
+  and matches in userspace. The search is anchored on the first fixed byte
+  so it can use Rust's memchr-backed `position()` — a 15-byte pattern over
+  144 MiB of executable mappings resolves in seconds.
 - `scan_game_code()` scans `get_game_regions()`; callers decide uniqueness
   policy (headless `apply` fails on 0 or 2+ hits unless `--first`).
+- **Drift repair** (`find_drifted` / `find_drifted_in_file`): when a pattern
+  stops matching (game update), byte positions are progressively relaxed to
+  wildcards and rescanned. The first level that hits yields the *real*
+  bytes at that address — the corrected pattern. This is what turns
+  "signature not found" into an actionable fix.
+- **Offline mode** (`scan_pe_file` / `find_drifted_in_file`): the same
+  scanning over a PE file on disk, using `core/src/pe.rs` to locate
+  executable sections. Lets configs be validated (and CI-gated) without a
+  running game.
 
-Performance: ~144 MiB of executable mappings scans in seconds; the TUI
-reuses the same path for its `s` (scan) key.
+## Volatile-byte analysis (`core/src/disasm.rs`)
+
+`iced-x86` decodes the instruction at a match so the bytes that change
+when code moves can be masked: RIP-relative displacements, relative branch
+operands (rel8/rel32) and address-like immediates. `portable_pattern()`
+renders the result as a relocation-tolerant pattern (`F3 0F 10 05 ?? ?? ?? ??`).
+A decoder-free heuristic (`heuristic_mask`) is available as a fallback.
 
 ## Process discovery (`core/src/process.rs`)
 
 `find_process(&ProcessConfig)` walks `/proc`, matching `names` (default
 case-insensitive) against `cmdline`, `maps`, and the `exe` symlink. Matching
 `maps` as well as `cmdline` matters under Wine, where the interesting string
-(`mgsvtpp.exe`) often appears only as the header mapping path.
+(`mgsvtpp.exe`) often appears only as the header mapping path. The trainer's
+own PID and its parent are excluded — their command lines routinely contain
+the game's exe name (e.g. `trainer_cli scan --exe mgsvtpp.exe`) and would
+otherwise self-match.
 
 ## Cheat model (`core/src/cheats.rs`, `core/src/config.rs`)
 

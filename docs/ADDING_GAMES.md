@@ -183,6 +183,44 @@ build had it at `+11F7A2B`) and even instruction encodings (`09 C2` vs
 - Check the exe's ASLR posture: MGSV opts out (`DYNAMIC_BASE=False`), so
   `base + RVA` is restart-stable. If your exe opts in, prefer signatures.
 
+### Automated drift detection & repair
+
+After a game update, run the scanner — it finds broken patterns and
+proposes the fix instead of leaving you to guess:
+
+```bash
+# Which patterns broke?
+trainer_cli scan --game "My Game" --config-dir games/ --offline
+
+# Apply the repairs to the config
+trainer_cli scan --game "My Game" --config-dir games/ --offline --repair
+```
+
+Output for a pattern whose bytes changed:
+
+```
+  [ 12] Infinite Resources   MISSING
+        ↳ drifted; relaxed bytes [0,1] match, suggested: '0B D0 41 89 13'
+```
+
+Mechanics: byte positions are progressively relaxed to wildcards and
+rescanned (up to `--max-relax`, default 2); the first level that matches
+yields the *real* bytes at that address, which is the corrected pattern.
+This is exactly how the MGSV `09 C2 41 89 13` → `0B D0 41 89 13` drift was
+recovered.
+
+For patterns that still match, `--suggest` prints a **portable** version
+with volatile bytes masked:
+
+```
+  [  1] Infinite Health      OK    game.exe+0x11F7A2B
+        ↳ portable pattern: 'F3 0F 11 4A D4'
+```
+
+Masking is done by decoding the instruction (iced-x86): RIP-relative
+displacements, relative branch operands and address-like immediates become
+`??`, so the pattern keeps matching when surrounding code moves.
+
 ## 5. Ship it
 
 1. Add `[[cheats]]` entries with hotkeys (see CHEAT_TYPES.md).

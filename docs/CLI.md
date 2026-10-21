@@ -69,6 +69,45 @@ module args. Prints per-cheat signatures plus a skipped-entries report.
 See ADDING_GAMES.md §2a. **Imports are nop approximations — validate each
 with `apply` before trusting it.**
 
+## `scan` — validate every signature (drift detection + repair)
+
+```bash
+# Live: scan the running game's memory
+trainer_cli scan --game "<name>" --config-dir games/ [--suggest] [--repair]
+
+# Offline: scan the exe on disk (no game running required)
+trainer_cli scan --game "<name>" --config-dir games/ --offline [--exe /path/to/game.exe]
+```
+
+Checks every signature in a game config and reports per cheat:
+
+| Status | Meaning |
+|---|---|
+| `OK` | exactly one match — the pattern is valid and unique |
+| `AMBIGUOUS` | multiple matches — lengthen the pattern or use `patch_offset` |
+| `MISSING` | no match — the pattern drifted between game builds |
+| `NO-PATTERN` | cheat has no signature (e.g. `write_value`) |
+
+For `MISSING` patterns it **hunts for the drift**: byte positions are
+progressively relaxed to wildcards and rescanned; when a relaxed pattern
+matches, the real bytes at that address are reported as the repaired
+pattern:
+
+```
+  [  2] Drifted pattern (2 bytes changed)          MISSING
+        ↳ drifted; relaxed bytes [0,4] match, suggested: '0F 11 01 EB 71 48 B9'
+```
+
+`--repair` writes the suggested patterns back into the game config (the
+config is re-validated afterwards). `--suggest` additionally prints a
+**portable pattern** for every OK cheat: the instruction is decoded
+(iced-x86) and volatile bytes (RIP-relative displacements, relative
+branch operands, address-like immediates) are masked with `??`, so the
+pattern survives code movement.
+
+Exit code is 1 when any pattern is ambiguous or missing — usable as a
+CI/regression gate after a game update.
+
 ## `validate` — check a config file
 
 ```bash

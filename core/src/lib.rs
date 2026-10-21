@@ -15,14 +15,18 @@ pub mod cheats;
 pub mod tui;
 pub mod config;
 pub mod game;
+pub mod pe;
+pub mod disasm;
 
 pub use memory::ProcessMemory;
-pub use scanner::{Signature, SignatureScanner};
+pub use scanner::{Signature, SignatureScanner, DriftCandidate};
 pub use process::{find_process, ProcessInfo};
 pub use cheats::{Cheat, CheatType, CheatManager, Hotkey, VirtualKey, ModifierKey};
 pub use tui::{TrainerApp, TrainerEvent};
 pub use config::{GameConfig, load_game_configs};
 pub use game::{GameModule, GameModuleBuilder};
+pub use pe::PeImage;
+pub use disasm::{volatile_mask, portable_pattern};
 
 #[cfg(test)]
 mod tests {
@@ -31,7 +35,7 @@ mod tests {
     #[test]
     fn test_signature_parse() {
         let sig = Signature::parse("48 89 5C 24 ?? 48 89 74 24 ?? 57 48 83 EC 20").unwrap();
-        assert_eq!(sig.bytes.len(), 14);
+        assert_eq!(sig.bytes.len(), 15);
         assert_eq!(sig.bytes[0], Some(0x48));
         assert_eq!(sig.bytes[4], None);
     }

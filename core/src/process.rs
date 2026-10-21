@@ -1,9 +1,17 @@
 use std::fs;
-use anyhow::{Result, Context};
+use anyhow::Result;
 
-/// Find processes matching the game configuration
+/// Find processes matching the game configuration.
+///
+/// The trainer itself (and its parent shell) are always excluded: their
+/// command lines routinely contain the game's exe name (e.g. when the
+/// trainer was launched as `trainer_cli scan --exe mgsvtpp.exe`), which
+/// would otherwise produce a self-match.
 pub fn find_process(config: &crate::config::ProcessConfig) -> Result<Vec<ProcessInfo>> {
     let mut processes = Vec::new();
+    
+    let self_pid = std::process::id() as i32;
+    let parent_pid = unsafe { libc::getppid() } as i32;
     
     for entry in fs::read_dir("/proc")? {
         let entry = entry?;
@@ -11,6 +19,9 @@ pub fn find_process(config: &crate::config::ProcessConfig) -> Result<Vec<Process
         let name_str = name.to_string_lossy();
         
         if let Ok(pid) = name_str.parse::<i32>() {
+            if pid == self_pid || pid == parent_pid {
+                continue;
+            }
             if is_matching_process(pid, config)? {
                 if let Ok(info) = get_process_info(pid) {
                     processes.push(info);

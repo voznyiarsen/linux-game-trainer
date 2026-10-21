@@ -1,4 +1,5 @@
 use trainer_core::{GameModuleBuilder, GameConfig, ProcessMemory, Signature, SignatureScanner, find_process};
+use trainer_core::pe::PeImage;
 use anyhow::{Result, Context, bail};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -61,6 +62,39 @@ enum Commands {
         /// Executable name fallback (default: guessed from aobscan modules)
         #[arg(short, long)]
         exe: Option<String>,
+    },
+
+    /// Validate every signature in a game config against the live game
+    /// (or the exe on disk with --offline). Reports OK / DRIFTED / AMBIGUOUS
+    /// per cheat and suggests a repaired pattern for drifted ones.
+    Scan {
+        /// Game name (as defined in game config)
+        #[arg(short, long)]
+        game: String,
+
+        /// Additional config directory
+        #[arg(short, long)]
+        config_dir: Option<PathBuf>,
+
+        /// Scan the executable on disk instead of live process memory
+        #[arg(long)]
+        offline: bool,
+
+        /// Path to the executable (offline mode). Default: auto-detect.
+        #[arg(long)]
+        exe: Option<PathBuf>,
+
+        /// Max byte positions to relax when hunting a drifted pattern
+        #[arg(long, default_value_t = 2)]
+        max_relax: usize,
+
+        /// Also suggest a relocation-proof pattern (masks volatile bytes)
+        #[arg(long)]
+        suggest: bool,
+
+        /// Write suggested repairs into the game config (in place)
+        #[arg(long)]
+        repair: bool,
     },
 
     /// Apply a single cheat headlessly (for testing/scripting, no TUI).
@@ -149,6 +183,12 @@ fn main() -> Result<()> {
             }
             println!("NOTE: imports are nop approximations of code-cave scripts.");
             println!("Validate each with `apply --cheat <id> --enable` before trusting it.");
+        }
+        Commands::Scan { game, config_dir, offline, exe, max_relax, suggest, repair } => {
+            let code = scan_game_signatures(&game, config_dir, offline, exe, max_relax, suggest, repair)?;
+            if code != 0 {
+                std::process::exit(code);
+            }
         }
         Commands::Apply { game, cheat, enable, disable, config_dir, backup_dir, first } => {
             let do_enable = if disable { false } else { true };
@@ -343,4 +383,340 @@ fn apply_cheat_headless(
 
 fn hex(b: &[u8]) -> String {
     b.iter().map(|x| format!("{:02x}", x)).collect::<Vec<_>>().join(" ")
+}
+
+/// Status of a single signature check.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum SigStatus {
+    Ok,
+    Ambiguous,
+    Missing,
+    NoPattern,
+}
+
+impl SigStatus {
+    fn label(self) -> &'static str {
+        match self {
+            SigStatus::Ok => "OK",
+            SigStatus::Ambiguous => "AMBIGUOUS",
+            SigStatus::Missing => "MISSING",
+            SigStatus::NoPattern => "NO-PATTERN",
+        }
+    }
+}
+
+/// What we are scanning: live process memory or the exe on disk.
+enum ScanTarget {
+    Live { pid: i32, base: usize, pm: ProcessMemory },
+    File { pe: PeImage, path: std::path::PathBuf },
+}
+
+impl ScanTarget {
+    fn describe(&self) -> String {
+        match self {
+            ScanTarget::Live { pid, base, .. } => {
+                format!("live (PID {}) — base 0x{:x}", pid, base)
+            }
+            ScanTarget::File { path, pe } => {
+                format!("offline (file scan) — {} (ImageBase 0x{:x}, {} sections)",
+                    path.display(), pe.image_base, pe.sections.len())
+            }
+        }
+    }
+}
+
+/// Abstraction over live memory / file scanning for byte reads.
+trait TargetScan {
+    fn read_at(&mut self, addr: usize, len: usize) -> Option<Vec<u8>>;
+    fn ip_for(&mut self, addr: usize) -> u64;
+}
+
+impl TargetScan for ScanTarget {
+    fn read_at(&mut self, addr: usize, len: usize) -> Option<Vec<u8>> {
+        match self {
+            ScanTarget::Live { pm, .. } => {
+                let mut buf = vec![0u8; len];
+                pm.read_memory(addr, &mut buf).ok()?;
+                Some(buf)
+            }
+            ScanTarget::File { pe, .. } => {
+                if addr + len > pe.data.len() {
+                    return None;
+                }
+                Some(pe.data[addr..addr + len].to_vec())
+            }
+        }
+    }
+
+    fn ip_for(&mut self, addr: usize) -> u64 {
+        match self {
+            ScanTarget::Live { .. } => addr as u64,
+            ScanTarget::File { pe, .. } => pe
+                .file_offset_to_rva(addr)
+                .map(|rva| pe.image_base + rva as u64)
+                .unwrap_or(addr as u64),
+        }
+    }
+}
+
+/// Validate every signature of a game config; optionally suggest repairs.
+///
+/// Exit code: 0 = all good, 1 = problems found (CI friendly).
+fn scan_game_signatures(
+    game: &str,
+    config_dir: Option<PathBuf>,
+    offline: bool,
+    exe_path: Option<PathBuf>,
+    max_relax: usize,
+    suggest: bool,
+    repair: bool,
+) -> Result<i32> {
+    use trainer_core::config::CheatTypeConfig;
+    use trainer_core::pe::PeImage;
+    use trainer_core::scanner::{find_drifted_in_file, scan_pe_file};
+
+    // 1. Load config
+    let mut builder = GameModuleBuilder::new();
+    if let Some(dir) = config_dir.clone() { builder = builder.add_config_dir(dir); }
+    let module = builder.build_by_name(game)?;
+    let config = module.config.clone();
+    let module_name = config.process.module_name.clone()
+        .unwrap_or_else(|| config.process.names[0].clone());
+
+    println!("Game: {}", config.metadata.name);
+    println!("Module: {}", module_name);
+
+    // 2. Set up the scan target
+    let mut target = if offline {
+        let exe = match exe_path {
+            Some(p) => p,
+            None => find_game_exe(&config)?,
+        };
+        ScanTarget::File { pe: PeImage::load(&exe)?, path: exe }
+    } else {
+        let procs = find_process(&config.process)?;
+        if procs.is_empty() {
+            bail!("No running process for {:?}. Use --offline to scan the exe on disk.", config.process.names);
+        }
+        let pid = procs[0].pid;
+        let mut pm = ProcessMemory::open(pid)?;
+        let base = pm.find_module_base(&module_name)?;
+        ScanTarget::Live { pid, base, pm }
+    };
+    println!("Mode: {}", target.describe());
+
+    // 3. Scan each signature-based cheat
+    let mut ok = 0usize;
+    let mut ambiguous = 0usize;
+    let mut missing = 0usize;
+    let mut nopattern = 0usize;
+    let mut repairs: Vec<(u32, String, String)> = Vec::new(); // (id, new pattern, reason)
+
+    for cheat_cfg in &config.cheats {
+        let signature = match &cheat_cfg.cheat_type {
+            CheatTypeConfig::Nop { signature, .. } => signature.clone(),
+            CheatTypeConfig::SignaturePatch { signature, .. } => signature.clone(),
+            _ => continue,
+        };
+        if signature.trim().is_empty() {
+            nopattern += 1;
+            println!("  [{:>3}] {:<42} {}", cheat_cfg.id, truncate(&cheat_cfg.name, 42), SigStatus::NoPattern.label());
+            continue;
+        }
+        let sig = Signature::parse(&signature)?;
+
+        let (hits, drift_candidates) = match &mut target {
+            ScanTarget::Live { pm, .. } => {
+                let mut scanner = SignatureScanner::new(pm);
+                let hits = scanner.scan_game_code(&sig)?;
+                let drift = if hits.is_empty() {
+                    scanner.find_drifted(&sig, max_relax)?
+                } else {
+                    Vec::new()
+                };
+                (hits, drift)
+            }
+            ScanTarget::File { pe, .. } => {
+                let hits = scan_pe_file(pe, &sig, true)?;
+                let drift = if hits.is_empty() {
+                    find_drifted_in_file(pe, &sig, max_relax, true)?
+                } else {
+                    Vec::new()
+                };
+                (hits, drift)
+            }
+        };
+
+        let status = if hits.is_empty() {
+            SigStatus::Missing
+        } else if hits.len() > 1 {
+            SigStatus::Ambiguous
+        } else {
+            SigStatus::Ok
+        };
+
+        match status {
+            SigStatus::Ok => ok += 1,
+            SigStatus::Ambiguous => ambiguous += 1,
+            SigStatus::Missing => missing += 1,
+            SigStatus::NoPattern => nopattern += 1,
+        }
+
+        // Address rendering
+        let loc = match &target {
+            ScanTarget::Live { base, .. } => {
+                hits.first().map(|h| format!("{}+0x{:X}", module_name, h - base))
+            }
+            ScanTarget::File { pe, .. } => hits
+                .first()
+                .and_then(|h| pe.file_offset_to_rva(*h))
+                .map(|rva| format!("{}+0x{:X}", module_name, rva)),
+        };
+
+        let mut line = format!("  [{:>3}] {:<42} {:<10}", cheat_cfg.id, truncate(&cheat_cfg.name, 42), status.label());
+        if let Some(l) = loc {
+            line.push_str(&format!(" {}", l));
+        }
+        if hits.len() > 1 {
+            line.push_str(&format!(" ({} hits)", hits.len()));
+        }
+        println!("{}", line);
+
+        // Drift suggestion
+        if let Some(cand) = drift_candidates.first() {
+            let suggested = cand.suggested_pattern();
+            let relaxed_at = cand.relaxed_positions.iter()
+                .map(|p| p.to_string()).collect::<Vec<_>>().join(",");
+            println!("        ↳ drifted; relaxed bytes [{}] match, suggested: '{}'",
+                relaxed_at, suggested);
+            repairs.push((cheat_cfg.id, suggested, format!("drift repair (relaxed bytes {})", relaxed_at)));
+        } else if suggest && status == SigStatus::Ok {
+            if let Some(portable) = portable_suggestion(&mut target, &sig, hits.first().copied()) {
+                println!("        ↳ portable pattern: '{}'", portable);
+            }
+        }
+    }
+
+    println!();
+    println!("Summary: {} OK, {} ambiguous, {} missing, {} without pattern", ok, ambiguous, missing, nopattern);
+
+    // 4. Optionally write repairs back into the config
+    if repair && !repairs.is_empty() {
+        let path = find_config_path(&config_dir, game)
+            .context("Could not locate the game config file to repair")?;
+        let mut text = std::fs::read_to_string(&path)?;
+        let mut applied = 0usize;
+        for (id, pattern, _reason) in &repairs {
+            // Replace the signature line inside the block whose id matches.
+            if let Some(pos) = text.find(&format!("id = {}", id)) {
+                if let Some(sig_pos) = text[pos..].find("signature = \"") {
+                    let start = pos + sig_pos + "signature = \"".len();
+                    if let Some(end_rel) = text[start..].find('"') {
+                        let end = start + end_rel;
+                        text.replace_range(start..end, pattern);
+                        applied += 1;
+                    }
+                }
+            }
+        }
+        std::fs::write(&path, &text)?;
+        println!("Repaired {} signature(s) in {}", applied, path.display());
+        // Re-validate
+        let revalidated = GameConfig::load_from_file(&path)?;
+        println!("Config still valid: {} cheats", revalidated.cheats.len());
+    }
+
+    if ambiguous > 0 || missing > 0 {
+        Ok(1)
+    } else {
+        Ok(0)
+    }
+}
+
+/// Suggest a relocation-proof pattern by masking volatile bytes.
+fn portable_suggestion(
+    target: &mut ScanTarget,
+    sig: &Signature,
+    hit: Option<usize>,
+) -> Option<String> {
+    let hit = hit?;
+    let code = target.read_at(hit, sig.len())?;
+    let ip = target.ip_for(hit);
+    let mask = trainer_core::disasm::volatile_mask(&code, ip);
+    if mask.is_empty() {
+        return None;
+    }
+    Some(trainer_core::disasm::portable_pattern(&code, &mask))
+}
+
+fn truncate(s: &str, max: usize) -> String {
+    if s.chars().count() <= max { s.to_string() } else {
+        format!("{}…", s.chars().take(max - 1).collect::<String>())
+    }
+}
+
+/// Locate the game's executable on disk (for offline scanning).
+fn find_game_exe(config: &trainer_core::config::GameConfig) -> Result<std::path::PathBuf> {
+    let name = config.process.module_name.clone()
+        .unwrap_or_else(|| config.process.names[0].clone());
+    let name = name.to_lowercase();
+
+    // Look through the user's game directories and Steam/Lutris libraries.
+    let mut roots: Vec<std::path::PathBuf> = Vec::new();
+    for base in [
+        std::env::var("HOME").unwrap_or_default(),
+    ] {
+        let base = std::path::PathBuf::from(base);
+        for sub in ["games", "Games", "GOG Games", ".steam/steamapps/common", ".local/share/Steam/steamapps/common", ".local/share/lutris/games"] {
+            let p = base.join(sub);
+            if p.exists() { roots.push(p); }
+        }
+    }
+
+    for root in roots {
+        // Bounded search: two levels deep is enough for common layouts.
+        let Ok(entries) = std::fs::read_dir(&root) else { continue };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() { continue; }
+            let direct = path.join(&name);
+            if direct.is_file() {
+                return Ok(direct);
+            }
+            if let Ok(sub_entries) = std::fs::read_dir(&path) {
+                for sub in sub_entries.flatten() {
+                    let candidate = sub.path().join(&name);
+                    if candidate.is_file() {
+                        return Ok(candidate);
+                    }
+                }
+            }
+        }
+    }
+
+    bail!("Could not find '{}' on disk. Pass --exe <path>.", name)
+}
+
+/// Locate a game config file on disk (for --repair).
+fn find_config_path(config_dir: &Option<PathBuf>, game: &str) -> Option<std::path::PathBuf> {
+    let mut dirs: Vec<std::path::PathBuf> = Vec::new();
+    if let Some(d) = config_dir { dirs.push(d.clone()); }
+    if let Some(d) = dirs::config_dir() {
+        dirs.push(d.join("trainer").join("games"));
+    }
+    dirs.push(std::path::PathBuf::from("games"));
+
+    for dir in dirs {
+        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) != Some("toml") { continue; }
+            if let Ok(cfg) = GameConfig::load_from_file(&path) {
+                if cfg.metadata.name == game {
+                    return Some(path);
+                }
+            }
+        }
+    }
+    None
 }

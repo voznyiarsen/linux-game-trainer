@@ -22,6 +22,13 @@ apply patches — all driven by per-game TOML configs, no recompilation needed.
   - `trainer_cli apply` — headless single-cheat apply/restore for scripting
     and testing. Scans *without* freezing the game, then attaches only for
     the brief write, with read-back verification and original-bytes backups.
+- **Signature lifecycle tooling**:
+  - `trainer_cli import-ct` — convert Cheat Engine tables into game TOML.
+  - `trainer_cli scan` — validate every signature of a config, detect
+    version drift, propose repaired patterns, and suggest relocation-proof
+    variants (decoded via iced-x86).
+  - Offline mode (`--offline`) validates against the exe on disk, so no
+    running game is required (CI friendly; exit code 1 on problems).
 - **Wine-aware**: handles Wine's anonymous executable mappings (only the PE
   header stays file-backed) and non-ASLR ImageBase layouts.
 - **Safe by default**: every patch saves original bytes; `disable` restores
@@ -72,13 +79,15 @@ TUI keys: `↑/↓` navigate · `Enter/Space` toggle cheat · `s` scan signature
 │   └── src/
 │       ├── lib.rs      # public API surface
 │       ├── memory.rs   # ptrace attach, /proc/pid/mem, module-base discovery
-│       ├── scanner.rs  # IDA-style signature scanner
+│       ├── scanner.rs  # IDA-style signature scanner + drift repair
+│       ├── pe.rs       # minimal PE parser (offline exe scanning)
+│       ├── disasm.rs   # volatile-byte detection (iced-x86) for portable patterns
 │       ├── process.rs  # /proc-based process discovery
 │       ├── cheats.rs   # Cheat / CheatType / CheatManager
 │       ├── config.rs   # TOML game-config schema + loading
 │       ├── tui.rs      # interactive terminal UI
 │       └── game.rs     # GameModule builder (config -> runnable trainer)
-├── cli/                # trainer_cli binary (run/list/validate/init/apply)
+├── cli/                # trainer_cli binary (run/list/validate/init/import-ct/apply/scan)
 ├── games/              # per-game TOML configs (e.g. mgsvtpp.toml, 26 cheats)
 └── docs/               # detailed documentation
 ```
@@ -93,7 +102,7 @@ TUI keys: `↑/↓` navigate · `Enter/Space` toggle cheat · `s` scan signature
 - [`docs/ADDING_GAMES.md`](docs/ADDING_GAMES.md) — end-to-end guide for adding
   a new game: finding the process, writing signatures, value-scanning for
   data cheats, and the encoding gotchas we hit in practice (×2-packed values,
-  static tables vs live counters).
+  static tables vs live counters), plus automated drift detection/repair.
 - [`docs/CLI.md`](docs/CLI.md) — full command reference for `trainer_cli`.
 - [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) — building, testing, and
   contributing notes.
